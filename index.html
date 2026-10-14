@@ -158,6 +158,8 @@ textarea{resize:vertical;min-height:56px}
 .err{color:var(--sun);font-size:12px;margin:0}
 .sheet p{margin:0;color:var(--muted);font-size:13px}
 #lveil{background:var(--bg)}
+.wtop{display:flex;justify-content:space-between;align-items:center;gap:10px;flex-wrap:wrap}
+.wrow .dl .dd{font-family:var(--mono);font-size:12px;color:var(--muted);font-weight:400}
 </style>
 </head>
 <body>
@@ -197,7 +199,7 @@ textarea{resize:vertical;min-height:56px}
   </section>
 
   <section id="v-wk" hidden style="display:flex;flex-direction:column;gap:10px">
-    <p class="wnote">요일마다 평소 하는 일을 한 줄에 하나씩 적어 주세요. 일일 체크 탭에서 그 요일의 체크 목록으로 나와요.</p>
+    <div class="wtop"><p class="wnote">이 주에 할 일을 한 줄에 하나씩 적어 주세요. 일일 체크 탭에서 그날의 체크 목록으로 나와요.</p><button class="ib" id="copyprev" type="button">지난주 일정 가져오기</button></div>
     <div class="wk" id="wk"></div>
   </section>
 
@@ -253,7 +255,7 @@ const RH = { waitForLogin: async () => store };
   const LKEY = "rabbithole.local.v1";
   const DEF = { bt:{name:"송범태",age:41,job:"선생님"}, sy:{name:"홍석영",age:28,job:"모델"} };
   // in-memory model
-  const data = { chars:{bt:{...DEF.bt}, sy:{...DEF.sy}}, weekly:{bt:{}, sy:{}}, days:{} }; // days[ymd][k] = {checks:{}, extra:[], memo:""}
+  const data = { chars:{bt:{...DEF.bt}, sy:{...DEF.sy}}, weekly:{}, days:{} }; // weekly["YYYY-MM-DD_k"] = {d0..d6} (주 시작 월요일 기준) // days[ymd][k] = {checks:{}, extra:[], memo:""}
   let db = null, readOnly = false, pending = false;
   const dirty = new Set();
 
@@ -268,8 +270,11 @@ const RH = { waitForLogin: async () => store };
 
   const nm = k => data.chars[k].name || DEF[k].name;
   const short = k => { const n = nm(k); return n.length >= 3 ? n.slice(1) : n; };
-  const weeklyText = (i,k) => (data.weekly[k] || {})["d"+i] || "";
-  const weeklyItems = (d,k) => weeklyText(dowOf(d),k).split("\n").map(s => s.trim()).filter(Boolean);
+  const mondayOf = d => addDays(sod(d), -dowOf(d));
+  const wkey = (d,k) => ymd(mondayOf(d))+"_"+k;
+  const weeklyText = (d,k) => (data.weekly[wkey(d,k)] || {})["d"+dowOf(d)] || "";
+  const weeklyItems = (d,k) => weeklyText(d,k).split("\n").map(s => s.trim()).filter(Boolean);
+  let wkStart = mondayOf(TODAY);
   const rec = (d,k) => (data.days[ymd(d)] || {})[k] || {};
   function ensure(d,k){
     const key = ymd(d); data.days[key] ||= {};
@@ -313,10 +318,10 @@ const RH = { waitForLogin: async () => store };
     queue("days/"+id, () => isEmpty(r) ? db.collection("days").doc(id).delete() : db.collection("days").doc(id).set(body))
       .finally(() => dirty.delete(id));
   }
-  function persistWeekly(k){
+  function persistWeekly(key){
     if (!db){ saveLocal(); return; }
-    dirty.add("w_"+k);
-    queue("weekly/"+k, () => db.collection("weekly").doc(k).set({...data.weekly[k]})).finally(() => dirty.delete("w_"+k));
+    dirty.add("w_"+key);
+    queue("weekly/"+key, () => db.collection("weekly").doc(key).set({...(data.weekly[key]||{})})).finally(() => dirty.delete("w_"+key));
   }
   function persistChar(k){
     if (!db){ saveLocal(); return; }
@@ -428,17 +433,22 @@ const RH = { waitForLogin: async () => store };
     for (const k of WHO){ const c = document.createElement("div"); c.innerHTML = '<span class="sw '+k+'"></span><span></span>'; c.firstChild.textContent = short(k)[0]; c.lastChild.textContent = nm(k); h.append(c); }
     w.append(h);
     const ph = { bt:"출근\n수업\n야자 감독", sy:"촬영\n피팅\n운동" };
+    const end = addDays(wkStart, 6);
+    $("mlbl").textContent = (wkStart.getMonth()+1)+"."+wkStart.getDate()+" – "+(end.getMonth()+1)+"."+end.getDate();
     for (let i = 0; i < 7; i++){
-      const row = document.createElement("div"); row.className = "wrow"+(i===6?" sun":"")+(i===dowOf(TODAY)?" now":"");
-      const dl = document.createElement("div"); dl.className = "dl"; dl.textContent = DOW[i]+"요일"; row.append(dl);
+      const day = addDays(wkStart, i);
+      const row = document.createElement("div"); row.className = "wrow"+(i===6?" sun":"")+(ymd(day)===ymd(TODAY)?" now":"");
+      const dl = document.createElement("div"); dl.className = "dl"; dl.textContent = DOW[i]+"요일 ";
+      const sm = document.createElement("small"); sm.className = "dd"; sm.textContent = (day.getMonth()+1)+"/"+day.getDate(); dl.append(sm); row.append(dl);
       for (const k of WHO){
+        const key = wkey(day,k);
         const c = document.createElement("div"); c.className = "c"; c.dataset.who = nm(k);
         const ta = document.createElement("textarea"); ta.className = k; ta.id = "w-"+i+"-"+k; ta.readOnly = readOnly;
         ta.placeholder = readOnly ? "" : "예)\n"+ph[k];
-        ta.value = weeklyText(i,k);
+        ta.value = weeklyText(day,k);
         ta.addEventListener("input", () => {
-          dirty.add("w_"+k); data.weekly[k] ||= {}; if (ta.value.trim()) data.weekly[k]["d"+i] = ta.value; else delete data.weekly[k]["d"+i];
-          debounce("w"+k, () => persistWeekly(k));
+          dirty.add("w_"+key); data.weekly[key] ||= {}; if (ta.value.trim()) data.weekly[key]["d"+i] = ta.value; else delete data.weekly[key]["d"+i];
+          debounce("w"+key, () => persistWeekly(key));
         });
         c.append(ta); row.append(c);
       }
@@ -455,15 +465,27 @@ const RH = { waitForLogin: async () => store };
 
   function setView(v){
     view = v; try { localStorage.setItem("rabbithole.tab", v); } catch(e){}
-    $("v-cal").hidden = v !== "cal"; $("v-wk").hidden = v !== "wk"; $("calnav").style.visibility = v === "cal" ? "visible" : "hidden";
+    $("v-cal").hidden = v !== "cal"; $("v-wk").hidden = v !== "wk"; 
     $("tab-cal").setAttribute("aria-selected", v==="cal"); $("tab-wk").setAttribute("aria-selected", v==="wk");
     render();
   }
   $("tab-cal").onclick = () => setView("cal");
   $("tab-wk").onclick = () => setView("wk");
-  $("prev").onclick = () => { month = new Date(month.getFullYear(), month.getMonth()-1, 1); renderGrid(); };
-  $("next").onclick = () => { month = new Date(month.getFullYear(), month.getMonth()+1, 1); renderGrid(); };
-  $("today").onclick = () => { sel = TODAY; month = new Date(TODAY.getFullYear(), TODAY.getMonth(), 1); renderCal(); };
+  $("prev").onclick = () => { if (view === "wk"){ wkStart = addDays(wkStart,-7); renderWeek(); } else { month = new Date(month.getFullYear(), month.getMonth()-1, 1); renderGrid(); } };
+  $("next").onclick = () => { if (view === "wk"){ wkStart = addDays(wkStart,7); renderWeek(); } else { month = new Date(month.getFullYear(), month.getMonth()+1, 1); renderGrid(); } };
+  $("today").onclick = () => { if (view === "wk"){ wkStart = mondayOf(TODAY); renderWeek(); } else { sel = TODAY; month = new Date(TODAY.getFullYear(), TODAY.getMonth(), 1); renderCal(); } };
+  $("copyprev").onclick = () => {
+    const prevStart = addDays(wkStart,-7); let n = 0;
+    for (const k of WHO){
+      const to = ymd(wkStart)+"_"+k, cur = data.weekly[to] || {};
+      if (Object.values(cur).some(v => (v||"").trim())) continue;
+      const src = data.weekly[ymd(prevStart)+"_"+k] || data.weekly[k];
+      if (!src || !Object.values(src).some(v => (v||"").trim())) continue;
+      data.weekly[to] = {...src}; persistWeekly(to); n++;
+    }
+    renderWeek();
+    if (!n) status("가져올 지난주 일정이 없거나, 이번 주 칸이 이미 채워져 있어요.");
+  };
 
   let pk;
   function openProfile(k){ if (readOnly) return; pk = k; const c = data.chars[k]; $("p-name").value = c.name||""; $("p-age").value = c.age ?? ""; $("p-job").value = c.job||""; $("pveil").hidden = false; setTimeout(() => $("p-name").focus(), 30); }
@@ -496,7 +518,7 @@ const RH = { waitForLogin: async () => store };
       refresh();
     }, lost);
     db.collection("weekly").onSnapshot(snap => {
-      snap.docs.forEach(d => { if (d.exists && WHO.includes(d.id) && !dirty.has("w_"+d.id)) data.weekly[d.id] = {...d.data()}; });
+      snap.docs.forEach(d => { if (d.exists && !dirty.has("w_"+d.id)) data.weekly[d.id] = {...d.data()}; });
       refresh();
     }, lost);
     db.collection("days").onSnapshot(snap => {
