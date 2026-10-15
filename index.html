@@ -106,7 +106,9 @@ h1 .amp{color:var(--accent);font-weight:500;margin:0 .15em}
 .item .x{border:0;background:none;color:var(--muted);padding:0 4px;font-size:16px;line-height:1;flex:none}
 .item .x:hover{color:var(--sun)}
 .none{color:var(--muted);font-size:12px;padding:2px 8px}
-.addrow input{border:1px dashed var(--line);background:transparent;border-radius:8px;padding:7px 10px;width:100%;min-width:0}
+.addrow{display:flex;gap:6px;margin:0}
+.addrow .ib{flex:none}
+.addrow input{flex:1;border:1px dashed var(--line);background:transparent;border-radius:8px;padding:7px 10px;width:100%;min-width:0}
 .addrow input:focus{border-style:solid;background:var(--bg)}
 .memo{display:flex;flex-direction:column;gap:4px;margin-top:6px}
 .memo label{font-size:12px;color:var(--muted)}
@@ -403,16 +405,22 @@ const RH = { waitForLogin: async () => store };
         g.append(lab);
       });
       if (!readOnly){
-        const ar = document.createElement("div"); ar.className = "addrow";
+        // 갤럭시(삼성 키보드 등 안드로이드)는 한글 입력 중 Enter를 keydown "Enter"로 보내지 않아서,
+        // keydown 대신 form submit(키보드 완료/Enter)과 [추가] 버튼으로 받는다.
+        const ar = document.createElement("form"); ar.className = "addrow"; ar.autocomplete = "off";
         const inp = document.createElement("input"); inp.type = "text"; inp.id = "add-"+k; inp.maxLength = 80;
-        inp.placeholder = "+ 오늘만 한 일 추가 (Enter)";
-        inp.onkeydown = e => {
-          if (e.key !== "Enter" || e.isComposing) return;
-          e.preventDefault(); const t = inp.value.trim(); if (!t) return;
+        inp.placeholder = "+ 오늘만 한 일 추가"; inp.enterKeyHint = "done";
+        const ab = document.createElement("button"); ab.type = "submit"; ab.className = "ib"; ab.textContent = "추가";
+        let lastAdd = 0;
+        ar.onsubmit = e => {
+          e.preventDefault();
+          const now = Date.now(); if (now - lastAdd < 300) return; // 맥 한글 입력 중복 Enter 방지
+          const t = inp.value.trim(); if (!t) return;
+          lastAdd = now;
           ensure(day,k).extra.push({t, done:true}); persistDay(day,k); inp.value = ""; renderCal();
           setTimeout(() => $("add-"+k) && $("add-"+k).focus(), 0);
         };
-        ar.append(inp); g.append(ar);
+        ar.append(inp, ab); g.append(ar);
       }
       const mm = document.createElement("div"); mm.className = "memo";
       const ml = document.createElement("label"); ml.htmlFor = "memo-"+k; ml.textContent = short(k)+" 메모";
